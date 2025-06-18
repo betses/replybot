@@ -1,0 +1,48 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+pip-wheel-metadata/
+
+# VS Code / IDE settings
+.vscode/
+.idea/
+
+# macOS system files
+.DS_Store
+
+# dotenv files (your secrets)
+.env
+.env.*
+
+# Logs
+*.log
+
+# pyproject build artifacts
+build/
+dist/
+*.egg-info/
+
+# Node packages (if you use frontend)
+node_modules/
+
+# Test outputs
+.coverage
+htmlcov/
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+
+# Others
+*.sqlite3
+*.db
