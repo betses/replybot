@@ -1,4 +1,4 @@
-# test_bot.py
+# replybot.py
 
 import os
 import discord
@@ -41,7 +41,7 @@ def parse_tweetshift_message(content: str):
     tweet_text = "\n".join(lines[:-1]).strip()
     return tweet_text, count
 
-# 6) Core: generate GPT replies with your custom instructions
+# 6) Core: generate GPT replies with custom instructions
 async def generate_replies(tweet: str, n: int) -> list[str]:
     # clamp n and compute token cap
     n = max(1, min(n, MAX_COMMENTS))
@@ -90,51 +90,49 @@ async def generate_replies(tweet: str, n: int) -> list[str]:
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
 
-# 8) Message handler: supports both !test and production
-@bot.event
-async def on_message(message):
-    # ignore the bot's own messages
-    if message.author == bot.user:
-        return
+# 8) Command: replybot
+@bot.command(name="replybot")
+async def replybot(ctx: commands.Context):
+    # Must be a reply to another message
+    ref = ctx.message.reference
+    if not ref or not ref.message_id:
+        return await ctx.send(
+            "⚠️ Please reply to a TweetShift post with `!replybot` to generate replies."
+        )
 
-    # ---- TEST MODE: !test ----
-    if message.content.strip() == "!test":
-        # fetch last two messages (to skip the !test itself)
-        history = []
-        async for m in message.channel.history(limit=2):
-            history.append(m)
-        if len(history) < 2:
-            return await message.channel.send("🤔 Not enough history to test.")
-        sample = history[1]  # the message before "!test"
+    # Fetch the referenced message
+    try:
+        ref_msg = await ctx.channel.fetch_message(ref.message_id)
+    except Exception:
+        return await ctx.send("⚠️ Could not fetch the referenced message.")
 
-        tweet, count = parse_tweetshift_message(sample.content)
-        count = max(1, min(count, MAX_COMMENTS))
-        await message.channel.send(f"🔍 Testing on: “{tweet[:80]}…” ({count} replies)")
+    tweet, count = parse_tweetshift_message(ref_msg.content)
+    if not tweet or count <= 0:
+        return await ctx.send(
+            "⚠️ The referenced message doesn't look like a valid TweetShift post. "
+            "Make sure it ends with something like `80L / 10R / 20C`."
+        )
 
-        replies = await generate_replies(tweet, count)
-        if not replies:
-            return await message.channel.send("⚠️ Could not generate replies.")
+    count = max(1, min(count, MAX_COMMENTS))
+    header = f"💬 Replies to: “{tweet[:60]}…”"
 
-        for r in replies:
-            await message.channel.send(r)
-        return
+    # Attempt to create a thread on the original message
+    try:
+        thread = await ref_msg.create_thread(
+            name=f"ReplyBot: {tweet[:50]}",
+            auto_archive_duration=60  # in minutes
+        )
+    except Exception:
+        thread = ctx.channel  # fallback to same channel
 
-    # ---- PRODUCTION MODE: auto-reply to TweetShift-style posts ----
-    if message.author.bot:
-        lines = message.content.splitlines()
-        if lines and lines[-1].strip().endswith("C"):
-            tweet, count = parse_tweetshift_message(message.content)
-            count = max(1, min(count, MAX_COMMENTS))
+    # Send header & generate replies
+    await thread.send(header)
+    replies = await generate_replies(tweet, count)
+    if not replies:
+        return await thread.send("⚠️ Couldn’t generate replies for this tweet.")
 
-            await message.channel.send(f"💬 Replies to: “{tweet[:80]}…”")
-
-            replies = await generate_replies(tweet, count)
-            if not replies:
-                return await message.channel.send(
-                    "⚠️ Couldn’t generate replies for this tweet."
-                )
-            for r in replies:
-                await message.channel.send(r)
+    for r in replies:
+        await thread.send(r)
 
 # 9) Run the bot
 if __name__ == "__main__":
