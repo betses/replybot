@@ -37,21 +37,32 @@ MAX_TOKENS_PER_CALL = 1024  # cap tokens per request
 
 # ─── 5) Parser: extract tweet text and dynamic comment count ─────────────────────
 def parse_tweetshift_message(content: str) -> tuple[str, int]:
-    # Match comment count pattern (e.g., 5C, 5-9C)
-    m = re.search(r"(\d+)(?:-(\d+))?C\b", content, flags=re.IGNORECASE)
-    if m:
-        count = int(m.group(2) or m.group(1))
-        count = min(count, MAX_COMMENTS)
-    else:
-        count = 0
-    # Strip all metric tags (L, R, C) and mentions
-    text = re.sub(r"\s*\d+(?:-\d+)?[lLrRcC]\b", "", content)
+    # Find all C tags, including ranges (e.g., 1-3C, 10-20C, 3C)
+    matches = re.findall(r"(\d+)(?:-(\d+))?C\b", content, flags=re.IGNORECASE)
+    counts = []
+    for m in matches:
+        if m[1]:
+            counts.append(int(m[1]))  # Use upper bound of range
+        else:
+            counts.append(int(m[0]))  # Use single value
+    count = max(counts) if counts else 0
+    count = min(count, MAX_COMMENTS)
+    # Split into lines and skip the first line if it looks like metadata
+    lines = content.splitlines()
+    if lines:
+        first_line = lines[0].strip()
+        # If the first line contains only tags, mentions, or brackets, skip it
+        if re.match(r"^(@\w+\s*)*([\d\-]+[lLrRcC]\s*[/+]*\s*)+.*(\[.*\])?\s*$", first_line):
+            lines = lines[1:]
+    text = "\n".join(lines).strip()
+    # Remove any remaining metric tags and mentions from the text
+    text = re.sub(r"\s*\d+(?:-\d+)?[lLrRcC]\b", "", text)
     text = re.sub(r"@\w+", "", text)
     text = re.sub(r"[\/|\\]", " ", text)
     text = re.sub(r"\s{2,}", " ", text).strip()
     return text, count
 
-# ─── 6) Core: generate GPT-4o replies dynamically with exact batch template ─────
+# ─── 6) Core: generate GPT-4.1 replies dynamically with exact batch template ─────
 async def generate_replies(tweet: str, n: int) -> list[str]:
     n = max(1, min(n, MAX_COMMENTS))
     max_tokens = min(150 * n, MAX_TOKENS_PER_CALL)
@@ -157,7 +168,9 @@ Replies {batch_ranges[4][0]}–{batch_ranges[4][1]} should sound like newcomers 
     if not body:
         return []
     replies = [line.strip() for line in body.splitlines() if line.strip()]
-    return replies
+    # Number the replies as an ordered list
+    numbered_replies = [f"{i+1}. {reply}" for i, reply in enumerate(replies)]
+    return numbered_replies[:n]
 
 # ─── 7) Threading helper ───────────────────────────────────────────────────────
 async def reply_in_thread(origin_msg: discord.Message, tweet: str, count: int):
